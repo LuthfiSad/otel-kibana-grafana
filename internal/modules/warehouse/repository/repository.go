@@ -18,7 +18,7 @@ func NewWarehouseRepository(db *sql.DB) *WarehouseRepository {
 
 func (r *WarehouseRepository) GetAll(ctx context.Context) ([]domain.Warehouse, error) {
 	start := time.Now()
-	rows, err := r.db.QueryContext(ctx, "SELECT id, name, location, created_at FROM warehouses")
+	rows, err := r.db.QueryContext(ctx, "SELECT id, tenant_id, name, location, status, created_at FROM warehouses")
 	if err != nil {
 		infrastructure.PushLog("repository", "WarehouseRepository.GetAll", "FAILED", err.Error(), nil)
 		return nil, err
@@ -28,7 +28,7 @@ func (r *WarehouseRepository) GetAll(ctx context.Context) ([]domain.Warehouse, e
 	var list []domain.Warehouse
 	for rows.Next() {
 		var w domain.Warehouse
-		if err := rows.Scan(&w.ID, &w.Name, &w.Location, &w.CreatedAt); err != nil {
+		if err := rows.Scan(&w.ID, &w.TenantID, &w.Name, &w.Location, &w.Status, &w.CreatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, w)
@@ -40,8 +40,8 @@ func (r *WarehouseRepository) GetAll(ctx context.Context) ([]domain.Warehouse, e
 func (r *WarehouseRepository) GetByID(ctx context.Context, id int) (*domain.Warehouse, error) {
 	start := time.Now()
 	var w domain.Warehouse
-	err := r.db.QueryRowContext(ctx, "SELECT id, name, location, created_at FROM warehouses WHERE id = $1", id).
-		Scan(&w.ID, &w.Name, &w.Location, &w.CreatedAt)
+	err := r.db.QueryRowContext(ctx, "SELECT id, tenant_id, name, location, status, created_at FROM warehouses WHERE id = $1", id).
+		Scan(&w.ID, &w.TenantID, &w.Name, &w.Location, &w.Status, &w.CreatedAt)
 	if err != nil {
 		infrastructure.PushLog("repository", "WarehouseRepository.GetByID", "FAILED", err.Error(), map[string]interface{}{"id": id})
 		return nil, err
@@ -52,8 +52,11 @@ func (r *WarehouseRepository) GetByID(ctx context.Context, id int) (*domain.Ware
 
 func (r *WarehouseRepository) Create(ctx context.Context, w *domain.Warehouse) error {
 	start := time.Now()
-	query := "INSERT INTO warehouses (name, location, created_at) VALUES ($1, $2, $3) RETURNING id"
-	err := r.db.QueryRowContext(ctx, query, w.Name, w.Location, time.Now()).Scan(&w.ID)
+	if w.TenantID == 0 {
+		w.TenantID = 1
+	}
+	query := "INSERT INTO warehouses (tenant_id, name, location, status, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING id"
+	err := r.db.QueryRowContext(ctx, query, w.TenantID, w.Name, w.Location, w.Status, time.Now()).Scan(&w.ID)
 	if err != nil {
 		infrastructure.PushLog("repository", "WarehouseRepository.Create", "FAILED", err.Error(), nil)
 		return err

@@ -18,7 +18,7 @@ func NewPaymentRepository(db *sql.DB) *PaymentRepository {
 
 func (r *PaymentRepository) GetAll(ctx context.Context) ([]domain.Payment, error) {
 	start := time.Now()
-	rows, err := r.db.QueryContext(ctx, "SELECT id, order_id, amount, payment_method, status, created_at FROM payments")
+	rows, err := r.db.QueryContext(ctx, "SELECT id, tenant_id, order_id, amount, payment_method, status, created_at FROM payments")
 	if err != nil {
 		infrastructure.PushLog("repository", "PaymentRepository.GetAll", "FAILED", err.Error(), nil)
 		return nil, err
@@ -28,7 +28,7 @@ func (r *PaymentRepository) GetAll(ctx context.Context) ([]domain.Payment, error
 	var list []domain.Payment
 	for rows.Next() {
 		var p domain.Payment
-		if err := rows.Scan(&p.ID, &p.OrderID, &p.Amount, &p.PaymentMethod, &p.Status, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.TenantID, &p.OrderID, &p.Amount, &p.PaymentMethod, &p.Status, &p.CreatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, p)
@@ -40,8 +40,8 @@ func (r *PaymentRepository) GetAll(ctx context.Context) ([]domain.Payment, error
 func (r *PaymentRepository) GetByID(ctx context.Context, id int) (*domain.Payment, error) {
 	start := time.Now()
 	var p domain.Payment
-	err := r.db.QueryRowContext(ctx, "SELECT id, order_id, amount, payment_method, status, created_at FROM payments WHERE id = $1", id).
-		Scan(&p.ID, &p.OrderID, &p.Amount, &p.PaymentMethod, &p.Status, &p.CreatedAt)
+	err := r.db.QueryRowContext(ctx, "SELECT id, tenant_id, order_id, amount, payment_method, status, created_at FROM payments WHERE id = $1", id).
+		Scan(&p.ID, &p.TenantID, &p.OrderID, &p.Amount, &p.PaymentMethod, &p.Status, &p.CreatedAt)
 	if err != nil {
 		infrastructure.PushLog("repository", "PaymentRepository.GetByID", "FAILED", err.Error(), map[string]interface{}{"id": id})
 		return nil, err
@@ -52,8 +52,11 @@ func (r *PaymentRepository) GetByID(ctx context.Context, id int) (*domain.Paymen
 
 func (r *PaymentRepository) Create(ctx context.Context, p *domain.Payment) error {
 	start := time.Now()
-	query := "INSERT INTO payments (order_id, amount, payment_method, status, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING id"
-	err := r.db.QueryRowContext(ctx, query, p.OrderID, p.Amount, p.PaymentMethod, p.Status, time.Now()).Scan(&p.ID)
+	if p.TenantID == 0 {
+		p.TenantID = 1
+	}
+	query := "INSERT INTO payments (tenant_id, order_id, amount, payment_method, status, created_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id"
+	err := r.db.QueryRowContext(ctx, query, p.TenantID, p.OrderID, p.Amount, p.PaymentMethod, p.Status, time.Now()).Scan(&p.ID)
 	if err != nil {
 		infrastructure.PushLog("repository", "PaymentRepository.Create", "FAILED", err.Error(), nil)
 		return err
