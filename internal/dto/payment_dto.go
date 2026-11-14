@@ -5,4 +5,5 @@ type PaymentRequest struct {
 	OrderID       int     `json:"order_id" binding:"required"`
 	Amount        float64 `json:"amount" binding:"required"`
 	PaymentMethod string  `json:"payment_method" binding:"required"`
+	Status        string  `json:"status"`
 }

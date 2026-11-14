@@ -65,54 +65,54 @@ func main() {
 		v1.POST("/audit", auditHdl.Record)
 		v1.GET("/audit", auditHdl.List)
 
-		// 2. Tenants (Full REST Actions mapped via handler/fallback)
+		// 2. Tenants
 		v1.GET("/tenants", tenantHdl.GetTenants)
-		v1.POST("/tenants", tenantHdl.GetTenants) // Fallback handled
-		v1.GET("/tenants/:id", tenantHdl.GetTenants)
-		v1.PUT("/tenants/:id", tenantHdl.GetTenants)
-		v1.DELETE("/tenants/:id", tenantHdl.GetTenants)
+		v1.POST("/tenants", tenantHdl.CreateTenant)
+		v1.GET("/tenants/:id", tenantHdl.GetTenantByID)
+		v1.PUT("/tenants/:id", tenantHdl.UpdateTenant)
+		v1.DELETE("/tenants/:id", tenantHdl.DeleteTenant)
 
 		// 3. Users
 		v1.GET("/users", userHdl.GetUsers)
 		v1.POST("/users", userHdl.CreateUser)
-		v1.GET("/users/:id", userHdl.GetUsers)
-		v1.PUT("/users/:id", userHdl.GetUsers)
-		v1.DELETE("/users/:id", userHdl.GetUsers)
+		v1.GET("/users/:id", userHdl.GetUserByID)
+		v1.PUT("/users/:id", userHdl.UpdateUser)
+		v1.DELETE("/users/:id", userHdl.DeleteUser)
 
 		// 4. Orders
 		v1.GET("/orders", orderHdl.GetOrders)
 		v1.POST("/orders", orderHdl.CreateOrder)
-		v1.GET("/orders/:id", orderHdl.GetOrders)
-		v1.PUT("/orders/:id", orderHdl.GetOrders)
-		v1.DELETE("/orders/:id", orderHdl.GetOrders)
+		v1.GET("/orders/:id", orderHdl.GetOrderByID)
+		v1.PUT("/orders/:id", orderHdl.UpdateOrder)
+		v1.DELETE("/orders/:id", orderHdl.DeleteOrder)
 
 		// 5. Products
 		v1.GET("/products", productHdl.GetProducts)
-		v1.POST("/products", productHdl.GetProducts)
-		v1.GET("/products/:id", productHdl.GetProducts)
-		v1.PUT("/products/:id", productHdl.GetProducts)
-		v1.DELETE("/products/:id", productHdl.GetProducts)
+		v1.POST("/products", productHdl.CreateProduct)
+		v1.GET("/products/:id", productHdl.GetProductByID)
+		v1.PUT("/products/:id", productHdl.UpdateProduct)
+		v1.DELETE("/products/:id", productHdl.DeleteProduct)
 
 		// 6. Payments
 		v1.GET("/payments", paymentHdl.GetPayments)
-		v1.POST("/payments", paymentHdl.GetPayments)
-		v1.GET("/payments/:id", paymentHdl.GetPayments)
-		v1.PUT("/payments/:id", paymentHdl.GetPayments)
-		v1.DELETE("/payments/:id", paymentHdl.GetPayments)
+		v1.POST("/payments", paymentHdl.CreatePayment)
+		v1.GET("/payments/:id", paymentHdl.GetPaymentByID)
+		v1.PUT("/payments/:id", paymentHdl.UpdatePayment)
+		v1.DELETE("/payments/:id", paymentHdl.DeletePayment)
 
 		// 7. Shipments
 		v1.GET("/shipments", shipmentHdl.GetShipments)
-		v1.POST("/shipments", shipmentHdl.GetShipments)
-		v1.GET("/shipments/:id", shipmentHdl.GetShipments)
-		v1.PUT("/shipments/:id", shipmentHdl.GetShipments)
-		v1.DELETE("/shipments/:id", shipmentHdl.GetShipments)
+		v1.POST("/shipments", shipmentHdl.CreateShipment)
+		v1.GET("/shipments/:id", shipmentHdl.GetShipmentByID)
+		v1.PUT("/shipments/:id", shipmentHdl.UpdateShipment)
+		v1.DELETE("/shipments/:id", shipmentHdl.DeleteShipment)
 
 		// 8. Warehouses
 		v1.GET("/warehouses", warehouseHdl.GetWarehouses)
-		v1.POST("/warehouses", warehouseHdl.GetWarehouses)
-		v1.GET("/warehouses/:id", warehouseHdl.GetWarehouses)
-		v1.PUT("/warehouses/:id", warehouseHdl.GetWarehouses)
-		v1.DELETE("/warehouses/:id", warehouseHdl.GetWarehouses)
+		v1.POST("/warehouses", warehouseHdl.CreateWarehouse)
+		v1.GET("/warehouses/:id", warehouseHdl.GetWarehouseByID)
+		v1.PUT("/warehouses/:id", warehouseHdl.UpdateWarehouse)
+		v1.DELETE("/warehouses/:id", warehouseHdl.DeleteWarehouse)
 
 		// 9. Inventory
 		v1.GET("/inventory", inventoryHdl.GetInventory)
