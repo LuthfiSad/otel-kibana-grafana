@@ -26,39 +26,65 @@ All `/api/v1/*` endpoints are protected by an enterprise-grade **Bearer Token Au
 
 ---
 
-## 📡 Comprehensive API Endpoints List
+## 📡 Full CRUD API Endpoints
 
-### 1. Tenant Management
-- **GET `/api/v1/tenants`** — Retrieve all tenants.
-- **POST `/api/v1/tenants`** — Create a new tenant.
+Every enterprise domain now supports complete **CRUD** operations (`GET`, `POST`, `PUT`, `DELETE`, and ID lookups):
 
-### 2. User Management
-- **GET `/api/v1/users`** — List all registered users.
-- **POST `/api/v1/users`** — Register a new user.
+### 1. Tenants (`/api/v1/tenants`)
+- `GET /api/v1/tenants` — List all tenants
+- `POST /api/v1/tenants` — Create a new tenant
+- `GET /api/v1/tenants/:id` — Get tenant by ID
+- `PUT /api/v1/tenants/:id` — Update tenant details
+- `DELETE /api/v1/tenants/:id` — Delete a tenant
 
-### 3. Order Management
-- **GET `/api/v1/orders`** — List all orders.
-- **POST `/api/v1/orders`** — Place a new order.
+### 2. Users (`/api/v1/users`)
+- `GET /api/v1/users` — List all users
+- `POST /api/v1/users` — Register a new user
+- `GET /api/v1/users/:id` — Get user by ID
+- `PUT /api/v1/users/:id` — Update user details
+- `DELETE /api/v1/users/:id` — Remove user
 
-### 4. Product Catalog
-- **GET `/api/v1/products`** — Retrieve product list.
-- **POST `/api/v1/products`** — Add a new product.
+### 3. Orders (`/api/v1/orders`)
+- `GET /api/v1/orders` — List orders
+- `POST /api/v1/orders` — Place order
+- `GET /api/v1/orders/:id` — Get order details
+- `PUT /api/v1/orders/:id` — Update order status
+- `DELETE /api/v1/orders/:id` — Cancel/Delete order
 
-### 5. Payment Processing
-- **GET `/api/v1/payments`** — List all payment transactions.
-- **POST `/api/v1/payments`** — Process a payment.
+### 4. Products (`/api/v1/products`)
+- `GET /api/v1/products` — List catalog products
+- `POST /api/v1/products` — Add product
+- `GET /api/v1/products/:id` — Get product details
+- `PUT /api/v1/products/:id` — Update product info
+- `DELETE /api/v1/products/:id` — Remove product
 
-### 6. Shipment & Logistics
-- **GET `/api/v1/shipments`** — List shipments.
-- **POST `/api/v1/shipments`** — Create a shipment / tracking record.
+### 5. Payments (`/api/v1/payments`)
+- `GET /api/v1/payments` — List payments
+- `POST /api/v1/payments` — Process payment
+- `GET /api/v1/payments/:id` — Get payment receipt/status
+- `PUT /api/v1/payments/:id` — Update payment status
+- `DELETE /api/v1/payments/:id` — Void/Delete payment
 
-### 7. Inventory & Warehouse
-- **GET `/api/v1/inventory`** — Check inventory stock levels.
-- **GET `/api/v1/warehouses`** — List active warehouses.
+### 6. Shipments (`/api/v1/shipments`)
+- `GET /api/v1/shipments` — List shipments
+- `POST /api/v1/shipments` — Create shipment
+- `GET /api/v1/shipments/:id` — Track shipment by ID
+- `PUT /api/v1/shipments/:id` — Update tracking status
+- `DELETE /api/v1/shipments/:id` — Cancel shipment
 
-### 8. Audit Logging
-- **GET `/api/v1/audit`** — Retrieve system audit trails.
-- **POST `/api/v1/audit`** — Record an audit event.
+### 7. Inventory & Warehouses (`/api/v1/inventory`, `/api/v1/warehouses`)
+- `GET /api/v1/inventory` — Check stock levels
+- `POST /api/v1/inventory` — Add/Initialize stock
+- `PUT /api/v1/inventory/:id` — Adjust stock quantity
+- `GET /api/v1/warehouses` — List warehouses
+- `POST /api/v1/warehouses` — Add warehouse
+- `GET /api/v1/warehouses/:id` — Get warehouse details
+- `PUT /api/v1/warehouses/:id` — Update warehouse info
+- `DELETE /api/v1/warehouses/:id` — Remove warehouse
+
+### 8. Audit Logs (`/api/v1/audit`)
+- `GET /api/v1/audit` — List audit logs
+- `POST /api/v1/audit` — Record audit event
 
 ---
 
