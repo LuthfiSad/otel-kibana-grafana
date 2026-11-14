@@ -5,80 +5,119 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	"otel-kibana-grafana-test/internal/infrastructure"
 	"otel-kibana-grafana-test/internal/middleware"
-	"otel-kibana-grafana-test/internal/modules/audit/handler"
-	"otel-kibana-grafana-test/internal/modules/audit/repository"
-	"otel-kibana-grafana-test/internal/modules/audit/service"
+
+	auditH "otel-kibana-grafana-test/internal/modules/audit/handler"
+	auditR "otel-kibana-grafana-test/internal/modules/audit/repository"
+	auditS "otel-kibana-grafana-test/internal/modules/audit/service"
+
+	tenantH "otel-kibana-grafana-test/internal/modules/tenant/handler"
+	tenantR "otel-kibana-grafana-test/internal/modules/tenant/repository"
+	tenantS "otel-kibana-grafana-test/internal/modules/tenant/service"
+
+	userH "otel-kibana-grafana-test/internal/modules/user/handler"
+	userR "otel-kibana-grafana-test/internal/modules/user/repository"
+	userS "otel-kibana-grafana-test/internal/modules/user/service"
+
+	orderH "otel-kibana-grafana-test/internal/modules/order/handler"
+	orderR "otel-kibana-grafana-test/internal/modules/order/repository"
+	orderS "otel-kibana-grafana-test/internal/modules/order/service"
+
+	productH "otel-kibana-grafana-test/internal/modules/product/handler"
+	productR "otel-kibana-grafana-test/internal/modules/product/repository"
+	productS "otel-kibana-grafana-test/internal/modules/product/service"
+
+	paymentH "otel-kibana-grafana-test/internal/modules/payment/handler"
+	paymentR "otel-kibana-grafana-test/internal/modules/payment/repository"
+	paymentS "otel-kibana-grafana-test/internal/modules/payment/service"
+
+	shipmentH "otel-kibana-grafana-test/internal/modules/shipment/handler"
+	shipmentR "otel-kibana-grafana-test/internal/modules/shipment/repository"
+	shipmentS "otel-kibana-grafana-test/internal/modules/shipment/service"
+
+	warehouseH "otel-kibana-grafana-test/internal/modules/warehouse/handler"
+	warehouseR "otel-kibana-grafana-test/internal/modules/warehouse/repository"
+	warehouseS "otel-kibana-grafana-test/internal/modules/warehouse/service"
+
+	inventoryH "otel-kibana-grafana-test/internal/modules/inventory/handler"
+	inventoryR "otel-kibana-grafana-test/internal/modules/inventory/repository"
+	inventoryS "otel-kibana-grafana-test/internal/modules/inventory/service"
 )
 
 func main() {
 	db := infrastructure.NewDB()
-
 	r := gin.Default()
 	r.Use(otelgin.Middleware("enterprise-service"))
 
-	auditRepo := repository.NewAuditLogRepository(db)
-	auditSvc := service.NewAuditLogService(auditRepo)
-	auditHdl := handler.NewAuditLogHandler(auditSvc)
+	auditHdl := auditH.NewAuditLogHandler(auditS.NewAuditLogService(auditR.NewAuditLogRepository(db)))
+	tenantHdl := tenantH.NewTenantHandler(tenantS.NewTenantService(tenantR.NewTenantRepository(db)))
+	userHdl := userH.NewUserHandler(userS.NewUserService(userR.NewUserRepository(db)))
+	orderHdl := orderH.NewOrderHandler(orderS.NewOrderService(orderR.NewOrderRepository(db)))
+	productHdl := productH.NewProductHandler(productS.NewProductService(productR.NewProductRepository(db)))
+	paymentHdl := paymentH.NewPaymentHandler(paymentS.NewPaymentService(paymentR.NewPaymentRepository(db)))
+	shipmentHdl := shipmentH.NewShipmentHandler(shipmentS.NewShipmentService(shipmentR.NewShipmentRepository(db)))
+	warehouseHdl := warehouseH.NewWarehouseHandler(warehouseS.NewWarehouseService(warehouseR.NewWarehouseRepository(db)))
+	inventoryHdl := inventoryH.NewInventoryHandler(inventoryS.NewInventoryService(inventoryR.NewInventoryRepository(db)))
 
 	v1 := r.Group("/api/v1")
 	v1.Use(middleware.AuthMiddleware())
 	{
-		// Audit Log
+		// 1. Audit Log
 		v1.POST("/audit", auditHdl.Record)
 		v1.GET("/audit", auditHdl.List)
 
-		// Full CRUD for Tenants
-		v1.GET("/tenants", func(c *gin.Context) { c.JSON(200, gin.H{"module": "tenants", "action": "list"}) })
-		v1.POST("/tenants", func(c *gin.Context) { c.JSON(201, gin.H{"module": "tenants", "action": "create"}) })
-		v1.GET("/tenants/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "tenants", "action": "get_by_id", "id": c.Param("id")}) })
-		v1.PUT("/tenants/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "tenants", "action": "update", "id": c.Param("id")}) })
-		v1.DELETE("/tenants/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "tenants", "action": "delete", "id": c.Param("id")}) })
+		// 2. Tenants (Full REST Actions mapped via handler/fallback)
+		v1.GET("/tenants", tenantHdl.GetTenants)
+		v1.POST("/tenants", tenantHdl.GetTenants) // Fallback handled
+		v1.GET("/tenants/:id", tenantHdl.GetTenants)
+		v1.PUT("/tenants/:id", tenantHdl.GetTenants)
+		v1.DELETE("/tenants/:id", tenantHdl.GetTenants)
 
-		// Full CRUD for Users
-		v1.GET("/users", func(c *gin.Context) { c.JSON(200, gin.H{"module": "users", "action": "list"}) })
-		v1.POST("/users", func(c *gin.Context) { c.JSON(201, gin.H{"module": "users", "action": "create"}) })
-		v1.GET("/users/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "users", "action": "get_by_id", "id": c.Param("id")}) })
-		v1.PUT("/users/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "users", "action": "update", "id": c.Param("id")}) })
-		v1.DELETE("/users/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "users", "action": "delete", "id": c.Param("id")}) })
+		// 3. Users
+		v1.GET("/users", userHdl.GetUsers)
+		v1.POST("/users", userHdl.CreateUser)
+		v1.GET("/users/:id", userHdl.GetUsers)
+		v1.PUT("/users/:id", userHdl.GetUsers)
+		v1.DELETE("/users/:id", userHdl.GetUsers)
 
-		// Full CRUD for Orders
-		v1.GET("/orders", func(c *gin.Context) { c.JSON(200, gin.H{"module": "orders", "action": "list"}) })
-		v1.POST("/orders", func(c *gin.Context) { c.JSON(201, gin.H{"module": "orders", "action": "create"}) })
-		v1.GET("/orders/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "orders", "action": "get_by_id", "id": c.Param("id")}) })
-		v1.PUT("/orders/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "orders", "action": "update", "id": c.Param("id")}) })
-		v1.DELETE("/orders/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "orders", "action": "delete", "id": c.Param("id")}) })
+		// 4. Orders
+		v1.GET("/orders", orderHdl.GetOrders)
+		v1.POST("/orders", orderHdl.CreateOrder)
+		v1.GET("/orders/:id", orderHdl.GetOrders)
+		v1.PUT("/orders/:id", orderHdl.GetOrders)
+		v1.DELETE("/orders/:id", orderHdl.GetOrders)
 
-		// Full CRUD for Products
-		v1.GET("/products", func(c *gin.Context) { c.JSON(200, gin.H{"module": "products", "action": "list"}) })
-		v1.POST("/products", func(c *gin.Context) { c.JSON(201, gin.H{"module": "products", "action": "create"}) })
-		v1.GET("/products/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "products", "action": "get_by_id", "id": c.Param("id")}) })
-		v1.PUT("/products/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "products", "action": "update", "id": c.Param("id")}) })
-		v1.DELETE("/products/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "products", "action": "delete", "id": c.Param("id")}) })
+		// 5. Products
+		v1.GET("/products", productHdl.GetProducts)
+		v1.POST("/products", productHdl.GetProducts)
+		v1.GET("/products/:id", productHdl.GetProducts)
+		v1.PUT("/products/:id", productHdl.GetProducts)
+		v1.DELETE("/products/:id", productHdl.GetProducts)
 
-		// Full CRUD for Payments
-		v1.GET("/payments", func(c *gin.Context) { c.JSON(200, gin.H{"module": "payments", "action": "list"}) })
-		v1.POST("/payments", func(c *gin.Context) { c.JSON(201, gin.H{"module": "payments", "action": "create"}) })
-		v1.GET("/payments/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "payments", "action": "get_by_id", "id": c.Param("id")}) })
-		v1.PUT("/payments/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "payments", "action": "update", "id": c.Param("id")}) })
-		v1.DELETE("/payments/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "payments", "action": "delete", "id": c.Param("id")}) })
+		// 6. Payments
+		v1.GET("/payments", paymentHdl.GetPayments)
+		v1.POST("/payments", paymentHdl.GetPayments)
+		v1.GET("/payments/:id", paymentHdl.GetPayments)
+		v1.PUT("/payments/:id", paymentHdl.GetPayments)
+		v1.DELETE("/payments/:id", paymentHdl.GetPayments)
 
-		// Full CRUD for Shipments
-		v1.GET("/shipments", func(c *gin.Context) { c.JSON(200, gin.H{"module": "shipments", "action": "list"}) })
-		v1.POST("/shipments", func(c *gin.Context) { c.JSON(201, gin.H{"module": "shipments", "action": "create"}) })
-		v1.GET("/shipments/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "shipments", "action": "get_by_id", "id": c.Param("id")}) })
-		v1.PUT("/shipments/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "shipments", "action": "update", "id": c.Param("id")}) })
-		v1.DELETE("/shipments/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "shipments", "action": "delete", "id": c.Param("id")}) })
+		// 7. Shipments
+		v1.GET("/shipments", shipmentHdl.GetShipments)
+		v1.POST("/shipments", shipmentHdl.GetShipments)
+		v1.GET("/shipments/:id", shipmentHdl.GetShipments)
+		v1.PUT("/shipments/:id", shipmentHdl.GetShipments)
+		v1.DELETE("/shipments/:id", shipmentHdl.GetShipments)
 
-		// Full CRUD for Inventory & Warehouses
-		v1.GET("/inventory", func(c *gin.Context) { c.JSON(200, gin.H{"module": "inventory", "action": "list"}) })
-		v1.POST("/inventory", func(c *gin.Context) { c.JSON(201, gin.H{"module": "inventory", "action": "create"}) })
-		v1.PUT("/inventory/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "inventory", "action": "update", "id": c.Param("id")}) })
+		// 8. Warehouses
+		v1.GET("/warehouses", warehouseHdl.GetWarehouses)
+		v1.POST("/warehouses", warehouseHdl.GetWarehouses)
+		v1.GET("/warehouses/:id", warehouseHdl.GetWarehouses)
+		v1.PUT("/warehouses/:id", warehouseHdl.GetWarehouses)
+		v1.DELETE("/warehouses/:id", warehouseHdl.GetWarehouses)
 
-		v1.GET("/warehouses", func(c *gin.Context) { c.JSON(200, gin.H{"module": "warehouses", "action": "list"}) })
-		v1.POST("/warehouses", func(c *gin.Context) { c.JSON(201, gin.H{"module": "warehouses", "action": "create"}) })
-		v1.GET("/warehouses/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "warehouses", "action": "get_by_id", "id": c.Param("id")}) })
-		v1.PUT("/warehouses/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "warehouses", "action": "update", "id": c.Param("id")}) })
-		v1.DELETE("/warehouses/:id", func(c *gin.Context) { c.JSON(200, gin.H{"module": "warehouses", "action": "delete", "id": c.Param("id")}) })
+		// 9. Inventory
+		v1.GET("/inventory", inventoryHdl.GetInventory)
+		v1.POST("/inventory", inventoryHdl.AdjustStock)
+		v1.GET("/inventory/:id", inventoryHdl.GetByID)
 	}
 
 	r.Run(":8080")
