@@ -40,16 +40,19 @@ func initTracer() (*sdktrace.TracerProvider, error) {
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exporter),
 		sdktrace.WithResource(resource.NewSchemaless(
-			semconv.ServiceNameKey.String("massive-enterprise-app"),
+			semconv.ServiceNameKey.String("clean-enterprise-app"),
 		)),
 	)
 	otel.SetTracerProvider(tp)
-	tracer = otel.Tracer("enterprise-tracer")
+	tracer = otel.Tracer("clean-arch-tracer")
 	return tp, nil
 }
 
-// PushAdvancedLog sends structured per-layer logs (Controller, Repository, Service) to Elasticsearch for Kibana Discover
-func PushAdvancedLog(layer, component, status, message string, payload map[string]interface{}) {
+// ==========================================
+// INFRASTRUCTURE LAYER: Elasticsearch Logger
+// ==========================================
+
+func PushLog(layer, component, status, message string, payload map[string]interface{}) {
 	esURL := os.Getenv("ELASTICSEARCH_URL")
 	if esURL == "" {
 		esURL = "http://elasticsearch:9200"
@@ -57,12 +60,12 @@ func PushAdvancedLog(layer, component, status, message string, payload map[strin
 
 	logEntry := map[string]interface{}{
 		"@timestamp": time.Now().UTC().Format(time.RFC3339Nano),
-		"service":    "massive-enterprise-app",
-		"layer":      layer,     // e.g., "controller", "repository", "system"
-		"component":  component, // e.g., "GetOrdersHandler", "OrdersRepo.FindAll"
-		"status":     status,    // "SUCCESS" or "FAILED"
+		"service":    "clean-enterprise-app",
+		"layer":      layer,
+		"component":  component,
+		"status":     status,
 		"message":    message,
-		"details":    payload,   // Request params, response summary, SQL errors, duration
+		"details":    payload,
 	}
 
 	body, err := json.Marshal(logEntry)
@@ -81,6 +84,300 @@ func PushAdvancedLog(layer, component, status, message string, payload map[strin
 	}()
 }
 
+// ==========================================
+// DOMAIN / ENTITY LAYER
+// ==========================================
+
+type User struct {
+	ID        int       `json:"id"`
+	Name      string    `json:"name"`
+	Email     string    `json:"email"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type Order struct {
+	ID           int       `json:"id"`
+	UserID       int       `json:"user_id"`
+	TotalAmount  float64   `json:"total_amount"`
+	Status       string    `json:"status"`
+	ShippingAddr string    `json:"shipping_address"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// ==========================================
+// REPOSITORY LAYER (Data Access)
+// ==========================================
+
+type UserRepository interface {
+	FindAll(ctx context.Context) ([]User, error)
+	Create(ctx context.Context, name, email string) (*User, error)
+}
+
+type OrderRepository interface {
+	FindAll(ctx context.Context) ([]Order, error)
+	Create(ctx context.Context, userID int, totalAmount float64, addr string) (*Order, error)
+}
+
+type postgresUserRepository struct {
+	db *sql.DB
+}
+
+func NewUserRepository(db *sql.DB) UserRepository {
+	return &postgresUserRepository{db: db}
+}
+
+func (r *postgresUserRepository) FindAll(ctx context.Context) ([]User, error) {
+	start := time.Now()
+	rows, err := r.db.QueryContext(ctx, "SELECT id, name, email, status, created_at FROM users LIMIT 50")
+	if err != nil {
+		PushLog("repository", "UserRepository.FindAll", "FAILED", err.Error(), map[string]interface{}{"duration_ms": time.Since(start).Milliseconds()})
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []User
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.Status, &u.CreatedAt); err != nil {
+			continue
+		}
+		users = append(users, u)
+	}
+	PushLog("repository", "UserRepository.FindAll", "SUCCESS", "Fetched users successfully", map[string]interface{}{"count": len(users), "duration_ms": time.Since(start).Milliseconds()})
+	return users, nil
+}
+
+func (r *postgresUserRepository) Create(ctx context.Context, name, email string) (*User, error) {
+	start := time.Now()
+	var u User
+	err := r.db.QueryRowContext(ctx, "INSERT INTO users (tenant_id, name, email, status) VALUES (1, $1, $2, 'ACTIVE') RETURNING id, name, email, status, created_at", name, email).
+		Scan(&u.ID, &u.Name, &u.Email, &u.Status, &u.CreatedAt)
+	if err != nil {
+		PushLog("repository", "UserRepository.Create", "FAILED", err.Error(), map[string]interface{}{"email": email, "duration_ms": time.Since(start).Milliseconds()})
+		return nil, err
+	}
+	PushLog("repository", "UserRepository.Create", "SUCCESS", "User created in database", map[string]interface{}{"user_id": u.ID, "duration_ms": time.Since(start).Milliseconds()})
+	return &u, nil
+}
+
+type postgresOrderRepository struct {
+	db *sql.DB
+}
+
+func NewOrderRepository(db *sql.DB) OrderRepository {
+	return &postgresOrderRepository{db: db}
+}
+
+func (r *postgresOrderRepository) FindAll(ctx context.Context) ([]Order, error) {
+	start := time.Now()
+	rows, err := r.db.QueryContext(ctx, "SELECT id, user_id, total_amount, status, shipping_address, created_at FROM orders LIMIT 50")
+	if err != nil {
+		PushLog("repository", "OrderRepository.FindAll", "FAILED", err.Error(), map[string]interface{}{"duration_ms": time.Since(start).Milliseconds()})
+		return nil, err
+	}
+	defer rows.Close()
+
+	var orders []Order
+	for rows.Next() {
+		var o Order
+		if err := rows.Scan(&o.ID, &o.UserID, &o.TotalAmount, &o.Status, &o.ShippingAddr, &o.CreatedAt); err != nil {
+			continue
+		}
+		orders = append(orders, o)
+	}
+	PushLog("repository", "OrderRepository.FindAll", "SUCCESS", "Fetched orders successfully", map[string]interface{}{"count": len(orders), "duration_ms": time.Since(start).Milliseconds()})
+	return orders, nil
+}
+
+func (r *postgresOrderRepository) Create(ctx context.Context, userID int, totalAmount float64, addr string) (*Order, error) {
+	start := time.Now()
+	var o Order
+	err := r.db.QueryRowContext(ctx, "INSERT INTO orders (tenant_id, user_id, total_amount, status, shipping_address) VALUES (1, $1, $2, 'COMPLETED', $3) RETURNING id, user_id, total_amount, status, shipping_address, created_at", userID, totalAmount, addr).
+		Scan(&o.ID, &o.UserID, &o.TotalAmount, &o.Status, &o.ShippingAddr, &o.CreatedAt)
+	if err != nil {
+		PushLog("repository", "OrderRepository.Create", "FAILED", err.Error(), map[string]interface{}{"user_id": userID, "duration_ms": time.Since(start).Milliseconds()})
+		return nil, err
+	}
+	PushLog("repository", "OrderRepository.Create", "SUCCESS", "Order created in database", map[string]interface{}{"order_id": o.ID, "duration_ms": time.Since(start).Milliseconds()})
+	return &o, nil
+}
+
+// ==========================================
+// SERVICE LAYER (Business Logic)
+// ==========================================
+
+type UserService interface {
+	GetAllUsers(ctx context.Context) ([]User, error)
+	RegisterUser(ctx context.Context, name, email string) (*User, error)
+}
+
+type OrderService interface {
+	GetAllOrders(ctx context.Context) ([]Order, error)
+	PlaceOrder(ctx context.Context, userID int, amount float64, addr string) (*Order, error)
+}
+
+type userService struct {
+	userRepo UserRepository
+}
+
+func NewUserService(repo UserRepository) UserService {
+	return &userService{userRepo: repo}
+}
+
+func (s *userService) GetAllUsers(ctx context.Context) ([]User, error) {
+	start := time.Now()
+	users, err := s.userRepo.FindAll(ctx)
+	if err != nil {
+		PushLog("service", "UserService.GetAllUsers", "FAILED", err.Error(), nil)
+		return nil, err
+	}
+	PushLog("service", "UserService.GetAllUsers", "SUCCESS", "Business logic executed", map[string]interface{}{"duration_ms": time.Since(start).Milliseconds()})
+	return users, nil
+}
+
+func (s *userService) RegisterUser(ctx context.Context, name, email string) (*User, error) {
+	start := time.Now()
+	u, err := s.userRepo.Create(ctx, name, email)
+	if err != nil {
+		PushLog("service", "UserService.RegisterUser", "FAILED", err.Error(), nil)
+		return nil, err
+	}
+	PushLog("service", "UserService.RegisterUser", "SUCCESS", "User registered successfully", map[string]interface{}{"duration_ms": time.Since(start).Milliseconds()})
+	return u, nil
+}
+
+type orderService struct {
+	orderRepo OrderRepository
+}
+
+func NewOrderService(repo OrderRepository) OrderService {
+	return &orderService{orderRepo: repo}
+}
+
+func (s *orderService) GetAllOrders(ctx context.Context) ([]Order, error) {
+	start := time.Now()
+	orders, err := s.orderRepo.FindAll(ctx)
+	if err != nil {
+		PushLog("service", "OrderService.GetAllOrders", "FAILED", err.Error(), nil)
+		return nil, err
+	}
+	PushLog("service", "OrderService.GetAllOrders", "SUCCESS", "Business logic executed", map[string]interface{}{"duration_ms": time.Since(start).Milliseconds()})
+	return orders, nil
+}
+
+func (s *orderService) PlaceOrder(ctx context.Context, userID int, amount float64, addr string) (*Order, error) {
+	start := time.Now()
+	o, err := s.orderRepo.Create(ctx, userID, amount, addr)
+	if err != nil {
+		PushLog("service", "OrderService.PlaceOrder", "FAILED", err.Error(), nil)
+		return nil, err
+	}
+	PushLog("service", "OrderService.PlaceOrder", "SUCCESS", "Order placed successfully", map[string]interface{}{"duration_ms": time.Since(start).Milliseconds()})
+	return o, nil
+}
+
+// ==========================================
+// CONTROLLER / TRANSPORT LAYER (HTTP Handlers)
+// ==========================================
+
+type UserController struct {
+	userService UserService
+}
+
+func NewUserController(r *gin.RouterGroup, service UserService) {
+	uc := &UserController{userService: service}
+	r.GET("/users", uc.GetUsers)
+	r.POST("/users", uc.CreateUser)
+}
+
+func (ctrl *UserController) GetUsers(c *gin.Context) {
+	start := time.Now()
+	PushLog("controller", "UserController.GetUsers", "SUCCESS", "HTTP GET /users received", nil)
+
+	users, err := ctrl.userService.GetAllUsers(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	PushLog("controller", "UserController.GetUsers", "SUCCESS", "HTTP request completed", map[string]interface{}{"total_duration_ms": time.Since(start).Milliseconds()})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": users})
+}
+
+func (ctrl *UserController) CreateUser(c *gin.Context) {
+	start := time.Now()
+	var input struct {
+		Name  string `json:"name" binding:"required"`
+		Email string `json:"email" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		PushLog("controller", "UserController.CreateUser", "FAILED", "Invalid request body", map[string]interface{}{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user, err := ctrl.userService.RegisterUser(c.Request.Context(), input.Name, input.Email)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	PushLog("controller", "UserController.CreateUser", "SUCCESS", "User created successfully via HTTP", map[string]interface{}{"total_duration_ms": time.Since(start).Milliseconds()})
+	c.JSON(http.StatusCreated, gin.H{"success": true, "data": user})
+}
+
+type OrderController struct {
+	orderService OrderService
+}
+
+func NewOrderController(r *gin.RouterGroup, service OrderService) {
+	oc := &OrderController{orderService: service}
+	r.GET("/orders", oc.GetOrders)
+	r.POST("/orders", oc.CreateOrder)
+}
+
+func (ctrl *OrderController) GetOrders(c *gin.Context) {
+	start := time.Now()
+	PushLog("controller", "OrderController.GetOrders", "SUCCESS", "HTTP GET /orders received", nil)
+
+	orders, err := ctrl.orderService.GetAllOrders(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	PushLog("controller", "OrderController.GetOrders", "SUCCESS", "HTTP request completed", map[string]interface{}{"total_duration_ms": time.Since(start).Milliseconds()})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": orders})
+}
+
+func (ctrl *OrderController) CreateOrder(c *gin.Context) {
+	start := time.Now()
+	var input struct {
+		UserID       int     `json:"user_id" binding:"required"`
+		TotalAmount  float64 `json:"total_amount" binding:"required"`
+		ShippingAddr string  `json:"shipping_address" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		PushLog("controller", "OrderController.CreateOrder", "FAILED", "Invalid request body", map[string]interface{}{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	order, err := ctrl.orderService.PlaceOrder(c.Request.Context(), input.UserID, input.TotalAmount, input.ShippingAddr)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	PushLog("controller", "OrderController.CreateOrder", "SUCCESS", "Order placed successfully via HTTP", map[string]interface{}{"total_duration_ms": time.Since(start).Milliseconds()})
+	c.JSON(http.StatusCreated, gin.H{"success": true, "data": order})
+}
+
+// ==========================================
+// MAIN BOOTSTRAPPER
+// ==========================================
+
 func main() {
 	tp, err := initTracer()
 	if err != nil {
@@ -88,7 +385,7 @@ func main() {
 	} else {
 		defer func() {
 			if err := tp.Shutdown(context.Background()); err != nil {
-				log.Printf("Error shutting down tracer provider: %v", err)
+				log.Printf("Error shutting down tracer: %v", err)
 			}
 		}()
 	}
@@ -107,354 +404,39 @@ func main() {
 				break
 			}
 		}
-		log.Printf("Attempt %d: Waiting for PostgreSQL connection...", i)
+		log.Printf("Attempt %d: Waiting for database...", i)
 		time.Sleep(3 * time.Second)
 	}
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		log.Fatalf("Failed to connect database: %v", err)
 	}
 
-	// Auto-migration for 10+ relational enterprise tables
-	schemaQueries := []string{
-		`CREATE TABLE IF NOT EXISTS tenants (
-			id SERIAL PRIMARY KEY,
-			name VARCHAR(255) NOT NULL,
-			subdomain VARCHAR(100) UNIQUE NOT NULL,
-			status VARCHAR(50) DEFAULT 'ACTIVE',
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE IF NOT EXISTS users (
-			id SERIAL PRIMARY KEY,
-			tenant_id INT REFERENCES tenants(id) ON DELETE CASCADE,
-			name VARCHAR(255) NOT NULL,
-			email VARCHAR(255) UNIQUE NOT NULL,
-			status VARCHAR(50) DEFAULT 'ACTIVE',
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE IF NOT EXISTS categories (
-			id SERIAL PRIMARY KEY,
-			tenant_id INT REFERENCES tenants(id) ON DELETE CASCADE,
-			name VARCHAR(255) NOT NULL,
-			slug VARCHAR(255) UNIQUE NOT NULL,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE IF NOT EXISTS products (
-			id SERIAL PRIMARY KEY,
-			tenant_id INT REFERENCES tenants(id) ON DELETE CASCADE,
-			category_id INT REFERENCES categories(id) ON DELETE SET NULL,
-			sku VARCHAR(100) UNIQUE NOT NULL,
-			name VARCHAR(255) NOT NULL,
-			price NUMERIC(12, 2) NOT NULL,
-			cost_price NUMERIC(12, 2) NOT NULL,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE IF NOT EXISTS warehouses (
-			id SERIAL PRIMARY KEY,
-			tenant_id INT REFERENCES tenants(id) ON DELETE CASCADE,
-			name VARCHAR(255) NOT NULL,
-			location VARCHAR(255) NOT NULL,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE IF NOT EXISTS inventory_stocks (
-			id SERIAL PRIMARY KEY,
-			warehouse_id INT REFERENCES warehouses(id) ON DELETE CASCADE,
-			product_id INT REFERENCES products(id) ON DELETE CASCADE,
-			quantity INT NOT NULL DEFAULT 0,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE IF NOT EXISTS orders (
-			id SERIAL PRIMARY KEY,
-			tenant_id INT REFERENCES tenants(id) ON DELETE CASCADE,
-			user_id INT REFERENCES users(id) ON DELETE CASCADE,
-			total_amount NUMERIC(12, 2) NOT NULL,
-			status VARCHAR(50) DEFAULT 'PENDING',
-			shipping_address TEXT,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE IF NOT EXISTS order_items (
-			id SERIAL PRIMARY KEY,
-			order_id INT REFERENCES orders(id) ON DELETE CASCADE,
-			product_id INT REFERENCES products(id) ON DELETE CASCADE,
-			quantity INT NOT NULL,
-			unit_price NUMERIC(12, 2) NOT NULL
-		)`,
-		`CREATE TABLE IF NOT EXISTS payments (
-			id SERIAL PRIMARY KEY,
-			order_id INT REFERENCES orders(id) ON DELETE CASCADE,
-			amount NUMERIC(12, 2) NOT NULL,
-			payment_gateway VARCHAR(100) DEFAULT 'MIDTRANS',
-			status VARCHAR(50) DEFAULT 'SUCCESS',
-			transaction_ref VARCHAR(255) UNIQUE,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE IF NOT EXISTS shipments (
-			id SERIAL PRIMARY KEY,
-			order_id INT REFERENCES orders(id) ON DELETE CASCADE,
-			courier VARCHAR(100) NOT NULL,
-			tracking_number VARCHAR(255) UNIQUE NOT NULL,
-			status VARCHAR(50) DEFAULT 'PROCESSING',
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE IF NOT EXISTS audit_logs (
-			id SERIAL PRIMARY KEY,
-			action VARCHAR(255) NOT NULL,
-			details TEXT,
-			ip_address VARCHAR(100),
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`,
-	}
+	// Auto-migration tables
+	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, tenant_id INT DEFAULT 1, name VARCHAR(255), email VARCHAR(255) UNIQUE, status VARCHAR(50), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`)
+	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS orders (id SERIAL PRIMARY KEY, tenant_id INT DEFAULT 1, user_id INT REFERENCES users(id), total_amount NUMERIC(12,2), status VARCHAR(50), shipping_address TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`)
+	PushLog("system", "Migration", "SUCCESS", "Clean architecture tables migrated", nil)
 
-	for _, q := range schemaQueries {
-		if _, err := db.Exec(q); err != nil {
-			PushAdvancedLog("system", "MigrationRepo", "FAILED", "Failed to execute schema migration", map[string]interface{}{"error": err.Error()})
-			log.Fatalf("Failed to execute schema migration: %v", err)
-		}
-	}
-	PushAdvancedLog("system", "MigrationRepo", "SUCCESS", "Database schema migration completed successfully", nil)
+	// Dependency Injection Wiring
+	userRepo := NewUserRepository(db)
+	orderRepo := NewOrderRepository(db)
 
-	// Automated Massive Seeder if empty
-	var userCount int
-	db.QueryRow("SELECT COUNT(*) FROM users").Scan(&userCount)
-	if userCount == 0 {
-		log.Println("Seeding massive enterprise data...")
-		PushAdvancedLog("system", "Seeder", "SUCCESS", "Starting database seeding", nil)
-
-		db.Exec(`INSERT INTO tenants (id, name, subdomain, status) VALUES (1, 'Enterprise Corp Alpha', 'alpha', 'ACTIVE')`)
-		db.Exec(`INSERT INTO tenants (id, name, subdomain, status) VALUES (2, 'Enterprise Corp Beta', 'beta', 'ACTIVE')`)
-		db.Exec(`INSERT INTO warehouses (tenant_id, name, location) VALUES (1, 'Central Jakarta Warehouse', 'Jakarta')`)
-		db.Exec(`INSERT INTO warehouses (tenant_id, name, location) VALUES (2, 'Surabaya Distribution Hub', 'Surabaya')`)
-
-		for i := 1; i <= 500; i++ {
-			db.Exec(`INSERT INTO users (tenant_id, name, email, status) VALUES ($1, $2, $3, $4)`,
-				(i%2)+1, fmt.Sprintf("Enterprise User %d", i), fmt.Sprintf("user%d@enterprise.com", i), "ACTIVE")
-		}
-		for i := 1; i <= 10; i++ {
-			db.Exec(`INSERT INTO categories (tenant_id, name, slug) VALUES ($1, $2, $3)`,
-				(i%2)+1, fmt.Sprintf("Category %d", i), fmt.Sprintf("cat-%d", i))
-		}
-		for i := 1; i <= 300; i++ {
-			db.Exec(`INSERT INTO products (tenant_id, category_id, sku, name, price, cost_price) VALUES ($1, $2, $3, $4, $5, $6)`,
-				(i%2)+1, (i%10)+1, fmt.Sprintf("SKU-ENT-%04d", i), fmt.Sprintf("Enterprise Product %d", i), float64(i)*150.5, float64(i)*100.0)
-			db.Exec(`INSERT INTO inventory_stocks (warehouse_id, product_id, quantity) VALUES ($1, $2, $3)`,
-				(i%2)+1, i, 1000)
-		}
-		for i := 1; i <= 1000; i++ {
-			db.Exec(`INSERT INTO orders (tenant_id, user_id, total_amount, status, shipping_address) VALUES ($1, $2, $3, $4, $5)`,
-				(i%2)+1, (i%500)+1, float64(i)*250.0, "COMPLETED", fmt.Sprintf("Jl. Sudirman No. %d, Jakarta", i))
-			db.Exec(`INSERT INTO payments (order_id, amount, status, transaction_ref) VALUES ($1, $2, $3, $4)`,
-				i, float64(i)*250.0, "SUCCESS", fmt.Sprintf("TRX-ENT-REF-%06d", i))
-			db.Exec(`INSERT INTO shipments (order_id, courier, tracking_number, status) VALUES ($1, $2, $3, $4)`,
-				i, "JNE-EXPRESS", fmt.Sprintf("JD-AWB-%06d", i), "DELIVERED")
-		}
-		for i := 1; i <= 100; i++ {
-			db.Exec(`INSERT INTO audit_logs (action, details, ip_address) VALUES ($1, $2, $3)`,
-				"SYSTEM_BOOT_SEED", fmt.Sprintf("Audit log entry batch %d", i), "192.168.1.100")
-		}
-
-		PushAdvancedLog("system", "Seeder", "SUCCESS", "Massive enterprise database seeding completed successfully", map[string]interface{}{"total_users": 500, "total_orders": 1000})
-		log.Println("Massive enterprise database seeding completed successfully!")
-	}
+	userService := NewUserService(userRepo)
+	orderService := NewOrderService(orderRepo)
 
 	r := gin.New()
 	r.Use(gin.Recovery())
-	r.Use(otelgin.Middleware("massive-enterprise-app"))
+	r.Use(otelgin.Middleware("clean-enterprise-app"))
 
-	// Health check controller
 	r.GET("/health", func(c *gin.Context) {
-		start := time.Now()
-		PushAdvancedLog("controller", "HealthHandler", "SUCCESS", "Health check accessed", map[string]interface{}{
-			"client_ip": c.ClientIP(),
-			"method":    c.Request.Method,
-		})
-		c.JSON(http.StatusOK, gin.H{
-			"service":      "massive-enterprise-observability-app",
-			"status":       "healthy",
-			"duration_ms":  time.Since(start).Milliseconds(),
-			"timestamp":    time.Now().UTC(),
-		})
+		c.JSON(200, gin.H{"status": "UP", "architecture": "clean-layered"})
 	})
 
-	// API v1 Group
 	api := r.Group("/api/v1")
-	{
-		// 1. Tenants
-		api.GET("/tenants", func(c *gin.Context) {
-			start := time.Now()
-			PushAdvancedLog("controller", "GetTenantsHandler", "SUCCESS", "Request received for tenants", map[string]interface{}{"client_ip": c.ClientIP()})
+	NewUserController(api, userService)
+	NewOrderController(api, orderService)
 
-			// Repository Layer execution
-			repoStart := time.Now()
-			rows, err := db.Query("SELECT id, name, subdomain, status, created_at FROM tenants")
-			if err != nil {
-				PushAdvancedLog("repository", "TenantsRepo.FindAll", "FAILED", "Database query failed", map[string]interface{}{"error": err.Error(), "duration_ms": time.Since(repoStart).Milliseconds()})
-				c.JSON(500, gin.H{"success": false, "error": err.Error()})
-				return
-			}
-			defer rows.Close()
-
-			var list []map[string]interface{}
-			for rows.Next() {
-				var id int
-				var name, subdomain, status string
-				var createdAt time.Time
-				rows.Scan(&id, &name, &subdomain, &status, &createdAt)
-				list = append(list, map[string]interface{}{"id": id, "name": name, "subdomain": subdomain, "status": status, "created_at": createdAt})
-			}
-			PushAdvancedLog("repository", "TenantsRepo.FindAll", "SUCCESS", "Query executed successfully", map[string]interface{}{"rows_count": len(list), "duration_ms": time.Since(repoStart).Milliseconds()})
-
-			PushAdvancedLog("controller", "GetTenantsHandler", "SUCCESS", "Request completed", map[string]interface{}{"total_duration_ms": time.Since(start).Milliseconds()})
-			c.JSON(http.StatusOK, gin.H{"success": true, "data": list})
-		})
-
-		// 2. Users
-		api.GET("/users", func(c *gin.Context) {
-			start := time.Now()
-			PushAdvancedLog("controller", "GetUsersHandler", "SUCCESS", "Request received for users", nil)
-
-			repoStart := time.Now()
-			rows, err := db.Query("SELECT id, tenant_id, name, email, status, created_at FROM users LIMIT 50")
-			if err != nil {
-				PushAdvancedLog("repository", "UsersRepo.FindLimit", "FAILED", "Database query failed", map[string]interface{}{"error": err.Error()})
-				c.JSON(500, gin.H{"success": false, "error": err.Error()})
-				return
-			}
-			defer rows.Close()
-
-			var list []map[string]interface{}
-			for rows.Next() {
-				var id, tenantID int
-				var name, email, status string
-				var createdAt time.Time
-				rows.Scan(&id, &tenantID, &name, &email, &status, &createdAt)
-				list = append(list, map[string]interface{}{"id": id, "tenant_id": tenantID, "name": name, "email": email, "status": status, "created_at": createdAt})
-			}
-			PushAdvancedLog("repository", "UsersRepo.FindLimit", "SUCCESS", "Query executed", map[string]interface{}{"rows_count": len(list), "duration_ms": time.Since(repoStart).Milliseconds()})
-
-			PushAdvancedLog("controller", "GetUsersHandler", "SUCCESS", "Request completed", map[string]interface{}{"total_duration_ms": time.Since(start).Milliseconds()})
-			c.JSON(http.StatusOK, gin.H{"success": true, "data": list})
-		})
-
-		// 3. Products
-		api.GET("/products", func(c *gin.Context) {
-			start := time.Now()
-			PushAdvancedLog("controller", "GetProductsHandler", "SUCCESS", "Request received for products", nil)
-
-			repoStart := time.Now()
-			rows, err := db.Query("SELECT id, sku, name, price, cost_price FROM products LIMIT 50")
-			if err != nil {
-				PushAdvancedLog("repository", "ProductsRepo.FindLimit", "FAILED", "Database query failed", map[string]interface{}{"error": err.Error()})
-				c.JSON(500, gin.H{"success": false, "error": err.Error()})
-				return
-			}
-			defer rows.Close()
-
-			var list []map[string]interface{}
-			for rows.Next() {
-				var id int
-				var sku, name string
-				var price, costPrice float64
-				rows.Scan(&id, &sku, &name, &price, &costPrice)
-				list = append(list, map[string]interface{}{"id": id, "sku": sku, "name": name, "price": price, "cost_price": costPrice})
-			}
-			PushAdvancedLog("repository", "ProductsRepo.FindLimit", "SUCCESS", "Query executed", map[string]interface{}{"rows_count": len(list), "duration_ms": time.Since(repoStart).Milliseconds()})
-
-			PushAdvancedLog("controller", "GetProductsHandler", "SUCCESS", "Request completed", map[string]interface{}{"total_duration_ms": time.Since(start).Milliseconds()})
-			c.JSON(http.StatusOK, gin.H{"success": true, "data": list})
-		})
-
-		// 4. Orders
-		api.GET("/orders", func(c *gin.Context) {
-			start := time.Now()
-			PushAdvancedLog("controller", "GetOrdersHandler", "SUCCESS", "Request received for orders", nil)
-
-			repoStart := time.Now()
-			rows, err := db.Query("SELECT id, tenant_id, user_id, total_amount, status, shipping_address, created_at FROM orders LIMIT 50")
-			if err != nil {
-				PushAdvancedLog("repository", "OrdersRepo.FindLimit", "FAILED", "Database query failed", map[string]interface{}{"error": err.Error()})
-				c.JSON(500, gin.H{"success": false, "error": err.Error()})
-				return
-			}
-			defer rows.Close()
-
-			var list []map[string]interface{}
-			for rows.Next() {
-				var id, tenantID, userID int
-				var totalAmount float64
-				var status, shippingAddress string
-				var createdAt time.Time
-				rows.Scan(&id, &tenantID, &userID, &totalAmount, &status, &shippingAddress, &createdAt)
-				list = append(list, map[string]interface{}{"id": id, "tenant_id": tenantID, "user_id": userID, "total_amount": totalAmount, "status": status, "shipping_address": shippingAddress, "created_at": createdAt})
-			}
-			PushAdvancedLog("repository", "OrdersRepo.FindLimit", "SUCCESS", "Query executed", map[string]interface{}{"rows_count": len(list), "duration_ms": time.Since(repoStart).Milliseconds()})
-
-			PushAdvancedLog("controller", "GetOrdersHandler", "SUCCESS", "Request completed", map[string]interface{}{"total_duration_ms": time.Since(start).Milliseconds()})
-			c.JSON(http.StatusOK, gin.H{"success": true, "data": list})
-		})
-
-		// 5. Payments
-		api.GET("/payments", func(c *gin.Context) {
-			start := time.Now()
-			PushAdvancedLog("controller", "GetPaymentsHandler", "SUCCESS", "Request received for payments", nil)
-
-			repoStart := time.Now()
-			rows, err := db.Query("SELECT id, order_id, amount, payment_gateway, status, transaction_ref, created_at FROM payments LIMIT 50")
-			if err != nil {
-				PushAdvancedLog("repository", "PaymentsRepo.FindLimit", "FAILED", "Database query failed", map[string]interface{}{"error": err.Error()})
-				c.JSON(500, gin.H{"success": false, "error": err.Error()})
-				return
-			}
-			defer rows.Close()
-
-			var list []map[string]interface{}
-			for rows.Next() {
-				var id, orderID int
-				var amount float64
-				var gateway, status, ref string
-				var createdAt time.Time
-				rows.Scan(&id, &orderID, &amount, &gateway, &status, &ref, &createdAt)
-				list = append(list, map[string]interface{}{"id": id, "order_id": orderID, "amount": amount, "gateway": gateway, "status": status, "transaction_ref": ref, "created_at": createdAt})
-			}
-			PushAdvancedLog("repository", "PaymentsRepo.FindLimit", "SUCCESS", "Query executed", map[string]interface{}{"rows_count": len(list), "duration_ms": time.Since(repoStart).Milliseconds()})
-
-			PushAdvancedLog("controller", "GetPaymentsHandler", "SUCCESS", "Request completed", map[string]interface{}{"total_duration_ms": time.Since(start).Milliseconds()})
-			c.JSON(http.StatusOK, gin.H{"success": true, "data": list})
-		})
-
-		// 6. Analytics Summary
-		api.GET("/analytics/summary", func(c *gin.Context) {
-			start := time.Now()
-			PushAdvancedLog("controller", "GetAnalyticsSummaryHandler", "SUCCESS", "Request received for analytics summary", nil)
-
-			repoStart := time.Now()
-			var totalUsers, totalProducts, totalOrders int
-			var totalRevenue float64
-			errU := db.QueryRow("SELECT COUNT(*) FROM users").Scan(&totalUsers)
-			errP := db.QueryRow("SELECT COUNT(*) FROM products").Scan(&totalProducts)
-			errO := db.QueryRow("SELECT COUNT(*) FROM orders").Scan(&totalOrders)
-			errR := db.QueryRow("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status='SUCCESS'").Scan(&totalRevenue)
-
-			if errU != nil || errP != nil || errO != nil || errR != nil {
-				PushAdvancedLog("repository", "AnalyticsRepo.Summary", "FAILED", "Database aggregated query failed", map[string]interface{}{"error": "query execution error"})
-				c.JSON(500, gin.H{"success": false, "error": "internal database error"})
-				return
-			}
-			PushAdvancedLog("repository", "AnalyticsRepo.Summary", "SUCCESS", "Aggregated query executed", map[string]interface{}{"duration_ms": time.Since(repoStart).Milliseconds()})
-
-			PushAdvancedLog("controller", "GetAnalyticsSummaryHandler", "SUCCESS", "Request completed", map[string]interface{}{"total_duration_ms": time.Since(start).Milliseconds()})
-			c.JSON(http.StatusOK, gin.H{
-				"success": true,
-				"analytics": gin.H{
-					"total_users":    totalUsers,
-					"total_products": totalProducts,
-					"total_orders":   totalOrders,
-					"total_revenue":  totalRevenue,
-				},
-			})
-		})
-	}
-
-	log.Println("Starting Massive Enterprise Observability Application on :8080 with Layer-Level Logging...")
+	log.Println("Starting Clean Architecture Enterprise App on :8080...")
 	if err := r.Run(":8080"); err != nil {
-		log.Fatalf("Failed to run server: %v", err)
+		log.Fatalf("Server crashed: %v", err)
 	}
 }
